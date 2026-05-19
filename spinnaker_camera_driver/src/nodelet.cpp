@@ -79,6 +79,7 @@ class SpinnakerCameraNodelet : public nodelet::Nodelet
 {
 public:
   SpinnakerCameraNodelet()
+    : consecutive_timeouts_(0)
   {
   }
 
@@ -583,6 +584,7 @@ private:
             // Get the image from the camera library
             NODELET_DEBUG_ONCE("Starting a new grab from camera with serial {%d}.", spinnaker_.getSerial());
             spinnaker_.grabImage(&wfov_image->image, frame_id_);
+            consecutive_timeouts_ = 0;
 
             // Set other values
             wfov_image->header.frame_id = frame_id_;
@@ -624,7 +626,22 @@ private:
           }
           catch (CameraTimeoutException& e)
           {
+            ++consecutive_timeouts_;
             NODELET_WARN("%s", e.what());
+            NODELET_WARN("Restarting camera acquisition after %u consecutive timeout(s).",
+                         consecutive_timeouts_);
+            try
+            {
+              spinnaker_.stop();
+              ros::Duration(0.2).sleep();
+              spinnaker_.start();
+            }
+            catch (std::runtime_error& restart_error)
+            {
+              NODELET_ERROR("Failed to restart camera acquisition after timeout: %s",
+                            restart_error.what());
+              state = ERROR;
+            }
           }
 
           catch (std::runtime_error& e)
@@ -693,6 +710,7 @@ private:
   SpinnakerCamera spinnaker_;      ///< Instance of the SpinnakerCamera library, used to interface with the hardware.
   sensor_msgs::CameraInfoPtr ci_;  ///< Camera Info message.
   std::string frame_id_;           ///< Frame id for the camera messages, defaults to 'camera'
+  unsigned int consecutive_timeouts_;
   std::shared_ptr<boost::thread> pubThread_;  ///< The thread that reads and publishes the images.
   std::shared_ptr<boost::thread> diagThread_;  ///< The thread that reads and publishes the diagnostics.
 
