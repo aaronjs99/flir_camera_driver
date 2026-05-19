@@ -280,12 +280,16 @@ void SpinnakerCamera::connect()
 void SpinnakerCamera::disconnect()
 {
   std::lock_guard<std::mutex> scopedLock(mutex_);
-  captureRunning_ = false;
   try
   {
     // Check if camera is connected
     if (pCam_)
     {
+      if (captureRunning_)
+      {
+        pCam_->EndAcquisition();
+        captureRunning_ = false;
+      }
       pCam_->DeInit();
       pCam_ = static_cast<int>(NULL);
       camList_.RemoveBySerial(std::to_string(serial_));
@@ -357,6 +361,7 @@ void SpinnakerCamera::grabImage(sensor_msgs::Image* image, const std::string& fr
         ROS_WARN_STREAM_ONCE("[SpinnakerCamera::grabImage] Image received from camera "
                               << std::to_string(serial_)
                               << " is incomplete. Trying again.");
+        image_ptr->Release();
         image_ptr = pCam_->GetNextImage(timeout_);
       }
 
@@ -455,9 +460,15 @@ void SpinnakerCamera::grabImage(sensor_msgs::Image* image, const std::string& fr
       // ROS_INFO_ONCE("\033[93m wxh: (%d, %d), stride: %d \n", width, height, stride);
       fillImage(*image, imageEncoding, height, width, stride, image_ptr->GetData());
       image->header.frame_id = frame_id;
+      image_ptr->Release();
     }
     catch (const Spinnaker::Exception& e)
     {
+      if (e.GetError() == Spinnaker::SPINNAKER_ERR_TIMEOUT)
+      {
+        throw CameraTimeoutException("[SpinnakerCamera::grabImage] Timed out waiting for a new image buffer: " +
+                                     std::string(e.what()));
+      }
       throw std::runtime_error("[SpinnakerCamera::grabImage] Failed to retrieve buffer with error: " +
                                std::string(e.what()));
     }
