@@ -72,6 +72,11 @@ void Camera::setNewConfiguration(const SpinnakerConfig& config, const uint32_t& 
     if (level >= LEVEL_RECONFIGURE_STOP)
       setImageControlFormats(config);
 
+    if (IsAvailable(node_map_->GetNode("AcquisitionMode")))
+    {
+      setProperty(node_map_, "AcquisitionMode", std::string("Continuous"));
+    }
+
     setFrameRate(static_cast<float>(config.acquisition_frame_rate));
     // Set enable after frame rate encase its false
     setProperty(node_map_, "AcquisitionFrameRateEnable", config.acquisition_frame_rate_enable);
