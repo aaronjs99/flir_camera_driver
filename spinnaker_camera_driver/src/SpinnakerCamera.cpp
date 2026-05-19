@@ -240,6 +240,9 @@ void SpinnakerCamera::connect()
       ROS_INFO("[SpinnakerCamera::connect]: Camera model name: %s", model_name_str.c_str());
       if (model_name_str.find("Blackfly S") != std::string::npos)
         camera_.reset(new Camera(node_map_));
+      else if (model_name_str.find("Forge") != std::string::npos ||
+               model_name_str.find("FG-PGE") != std::string::npos)
+        camera_.reset(new Camera(node_map_));
       else if (model_name_str.find("Chameleon3") != std::string::npos)
         camera_.reset(new Cm3(node_map_));
       else if (model_name_str.find("Grasshopper3") != std::string::npos)
