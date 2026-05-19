@@ -68,13 +68,30 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <dynamic_reconfigure/server.h>  // Needed for the dynamic_reconfigure gui service to run
 
+#include <arpa/inet.h>
+
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace spinnaker_camera_driver
 {
+namespace
+{
+bool parseIPv4Address(const std::string& value, uint32_t* address)
+{
+  struct in_addr parsed_address;
+  if (inet_pton(AF_INET, value.c_str(), &parsed_address) != 1)
+  {
+    return false;
+  }
+  *address = ntohl(parsed_address.s_addr);
+  return true;
+}
+}  // namespace
+
 class SpinnakerCameraNodelet : public nodelet::Nodelet
 {
 public:
@@ -298,6 +315,20 @@ private:
     NODELET_DEBUG_ONCE("Using camera serial %d", serial);
 
     spinnaker_.setDesiredCamera((uint32_t)serial);
+
+    std::string camera_ip;
+    pnh.param<std::string>("camera_ip", camera_ip, "");
+    if (!camera_ip.empty())
+    {
+      uint32_t expected_ip_address = 0;
+      if (!parseIPv4Address(camera_ip, &expected_ip_address))
+      {
+        throw std::runtime_error("Invalid camera_ip parameter '" + camera_ip + "'. Expected dotted IPv4 address.");
+      }
+
+      NODELET_INFO("Using expected camera IP %s", camera_ip.c_str());
+      spinnaker_.setExpectedIPAddress(expected_ip_address);
+    }
 
     // Get GigE camera parameters:
     pnh.param<int>("packet_size", packet_size_, 1400);

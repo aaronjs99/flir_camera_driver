@@ -44,15 +44,34 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <iostream>
 #include <sstream>
-#include <typeinfo>
 #include <string>
+#include <typeinfo>
 
 #include <ros/ros.h>
 
 namespace spinnaker_camera_driver
 {
+namespace
+{
+std::string formatIPv4Address(const uint64_t& address)
+{
+  if (address == 0)
+  {
+    return "unknown";
+  }
+
+  std::ostringstream stream;
+  stream << ((address >> 24) & 0xff) << "."
+         << ((address >> 16) & 0xff) << "."
+         << ((address >> 8) & 0xff) << "."
+         << (address & 0xff);
+  return stream.str();
+}
+}  // namespace
+
 SpinnakerCamera::SpinnakerCamera()
   : serial_(0)
+  , expected_ip_address_(0)
   , system_(Spinnaker::System::GetInstance())
   , camList_(system_->GetCameras())
   , pCam_(static_cast<int>(NULL))  // Hack to suppress compiler warning. Spinnaker has only one contructor which takes
@@ -142,6 +161,11 @@ Spinnaker::GenApi::CNodePtr SpinnakerCamera::readProperty(const Spinnaker::GenIC
   }
 }
 
+void SpinnakerCamera::setExpectedIPAddress(const uint32_t& address)
+{
+  expected_ip_address_ = address;
+}
+
 void SpinnakerCamera::connect()
 {
   if (!pCam_)
@@ -156,6 +180,7 @@ void SpinnakerCamera::connect()
         Spinnaker::CameraPtr selected_cam(static_cast<int>(NULL));
         bool saw_matching_serial = false;
         bool saw_wrong_subnet = false;
+        bool saw_expected_ip_mismatch = false;
 
         for (unsigned int i = 0; i < camList_.GetSize(); ++i)
         {
@@ -188,35 +213,65 @@ void SpinnakerCamera::connect()
           }
 
           Spinnaker::GenApi::CIntegerPtr ip_ptr = tl_node_map.GetNode("GevDeviceIPAddress");
-          int64_t camera_ip = 0;
+          uint64_t camera_ip = 0;
+          bool has_camera_ip = false;
           if (IsAvailable(ip_ptr) && IsReadable(ip_ptr))
           {
-            camera_ip = ip_ptr->GetValue();
+            camera_ip = static_cast<uint64_t>(ip_ptr->GetValue());
+            has_camera_ip = true;
           }
 
           if (wrong_subnet)
           {
             saw_wrong_subnet = true;
-            ROS_WARN_STREAM("[SpinnakerCamera::connect] Skipping serial "
-                            << serial_string << " candidate on wrong subnet"
-                            << " access=" << access_status << " ip=0x" << std::hex << camera_ip << std::dec);
+            ROS_DEBUG_STREAM("[SpinnakerCamera::connect] Skipping serial "
+                             << serial_string << " candidate on wrong subnet"
+                             << " access=" << access_status
+                             << " ip=" << formatIPv4Address(camera_ip)
+                             << " ip_hex=0x" << std::hex << camera_ip << std::dec);
+            continue;
+          }
+
+          if (expected_ip_address_ != 0 &&
+              (!has_camera_ip || static_cast<uint32_t>(camera_ip) != expected_ip_address_))
+          {
+            saw_expected_ip_mismatch = true;
+            ROS_DEBUG_STREAM("[SpinnakerCamera::connect] Skipping serial "
+                             << serial_string << " candidate with unexpected IP"
+                             << " access=" << access_status
+                             << " ip=" << formatIPv4Address(camera_ip)
+                             << " expected_ip=" << formatIPv4Address(expected_ip_address_)
+                             << " ip_hex=0x" << std::hex << camera_ip
+                             << " expected_ip_hex=0x" << expected_ip_address_ << std::dec);
             continue;
           }
 
           ROS_INFO_STREAM("[SpinnakerCamera::connect] Selected serial "
                           << serial_string << " candidate"
-                          << " access=" << access_status << " ip=0x" << std::hex << camera_ip << std::dec);
+                          << " access=" << access_status
+                          << " ip=" << formatIPv4Address(camera_ip)
+                          << " ip_hex=0x" << std::hex << camera_ip << std::dec);
           selected_cam = candidate;
           break;
         }
 
         if (!selected_cam || !selected_cam->IsValid())
         {
+          std::ostringstream error;
+          error << "no usable camera entry was found for serial " << serial_string;
+          if (expected_ip_address_ != 0)
+          {
+            error << " at expected IP " << formatIPv4Address(expected_ip_address_);
+          }
           if (saw_matching_serial && saw_wrong_subnet)
           {
-            throw std::runtime_error("only wrong-subnet camera entries were found for serial " + serial_string);
+            error << "; skipped wrong-subnet entries";
           }
-          throw std::runtime_error("no usable camera entry was found for serial " + serial_string);
+          if (saw_matching_serial && saw_expected_ip_mismatch)
+          {
+            error << "; skipped candidates with other IPs";
+          }
+          throw std::runtime_error(error.str());
         }
 
         pCam_ = selected_cam;

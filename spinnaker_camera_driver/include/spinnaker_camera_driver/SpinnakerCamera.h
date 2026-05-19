@@ -160,6 +160,17 @@ public:
   */
   void setDesiredCamera(const uint32_t& id);
 
+  /*!
+  * \brief Used to restrict GigE camera selection to an expected IPv4 address.
+  *
+  * Spinnaker can enumerate the same GigE camera through multiple host interface
+  * entries when a NIC carries several subnets.  Serial number alone is then not
+  * enough to select the usable entry deterministically, so production launches
+  * should set this alongside setDesiredCamera().
+  * \param address IPv4 address as a host-order uint32_t. Zero disables filtering.
+  */
+  void setExpectedIPAddress(const uint32_t& address);
+
   void setGain(const float& gain);
   int getHeightMax();
   int getWidthMax();
@@ -173,6 +184,7 @@ public:
 
 private:
   uint32_t serial_;  ///< A variable to hold the serial number of the desired camera.
+  uint32_t expected_ip_address_;  ///< Optional expected GigE camera IPv4 address.
 
   Spinnaker::SystemPtr system_;
   Spinnaker::CameraList camList_;
