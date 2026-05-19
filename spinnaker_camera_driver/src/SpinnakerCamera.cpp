@@ -153,7 +153,73 @@ void SpinnakerCamera::connect()
 
       try
       {
-        pCam_ = camList_.GetBySerial(serial_string);
+        Spinnaker::CameraPtr selected_cam(static_cast<int>(NULL));
+        bool saw_matching_serial = false;
+        bool saw_wrong_subnet = false;
+
+        for (unsigned int i = 0; i < camList_.GetSize(); ++i)
+        {
+          Spinnaker::CameraPtr candidate = camList_.GetByIndex(i);
+          if (!candidate || !candidate->IsValid())
+            continue;
+
+          Spinnaker::GenApi::INodeMap& tl_node_map = candidate->GetTLDeviceNodeMap();
+          Spinnaker::GenApi::CStringPtr serial_ptr = tl_node_map.GetNode("DeviceSerialNumber");
+          if (!IsAvailable(serial_ptr) || !IsReadable(serial_ptr) ||
+              serial_string != std::string(serial_ptr->GetValue().c_str()))
+          {
+            continue;
+          }
+
+          saw_matching_serial = true;
+
+          bool wrong_subnet = false;
+          Spinnaker::GenApi::CBooleanPtr wrong_subnet_ptr = tl_node_map.GetNode("GevDeviceIsWrongSubnet");
+          if (IsAvailable(wrong_subnet_ptr) && IsReadable(wrong_subnet_ptr))
+          {
+            wrong_subnet = wrong_subnet_ptr->GetValue();
+          }
+
+          Spinnaker::GenApi::CEnumerationPtr access_ptr = tl_node_map.GetNode("DeviceAccessStatus");
+          std::string access_status = "unknown";
+          if (IsAvailable(access_ptr) && IsReadable(access_ptr))
+          {
+            access_status = std::string(access_ptr->ToString().c_str());
+          }
+
+          Spinnaker::GenApi::CIntegerPtr ip_ptr = tl_node_map.GetNode("GevDeviceIPAddress");
+          int64_t camera_ip = 0;
+          if (IsAvailable(ip_ptr) && IsReadable(ip_ptr))
+          {
+            camera_ip = ip_ptr->GetValue();
+          }
+
+          if (wrong_subnet)
+          {
+            saw_wrong_subnet = true;
+            ROS_WARN_STREAM("[SpinnakerCamera::connect] Skipping serial "
+                            << serial_string << " candidate on wrong subnet"
+                            << " access=" << access_status << " ip=0x" << std::hex << camera_ip << std::dec);
+            continue;
+          }
+
+          ROS_INFO_STREAM("[SpinnakerCamera::connect] Selected serial "
+                          << serial_string << " candidate"
+                          << " access=" << access_status << " ip=0x" << std::hex << camera_ip << std::dec);
+          selected_cam = candidate;
+          break;
+        }
+
+        if (!selected_cam || !selected_cam->IsValid())
+        {
+          if (saw_matching_serial && saw_wrong_subnet)
+          {
+            throw std::runtime_error("only wrong-subnet camera entries were found for serial " + serial_string);
+          }
+          throw std::runtime_error("no usable camera entry was found for serial " + serial_string);
+        }
+
+        pCam_ = selected_cam;
       }
       catch (const Spinnaker::Exception& e)
       {
